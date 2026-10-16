@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code and documents
 COPY my_rag_api.py .
+COPY config.py .
 COPY docs/ docs/
 
 # Document the port

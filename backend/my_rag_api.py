@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import chromadb
 import requests
 import os
+from config import settings
 
 app = FastAPI(title="My RAG API", version="1.0")
 app.add_middleware(
@@ -13,21 +14,18 @@ app.add_middleware(
     allow_methods=["*"],
 )
 
-# --- Config ---
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-MODEL = os.environ.get("MODEL_NAME", "llama3.2:1b")
-DB_PATH = "./my_rag_db"
-
 # --- ChromaDB Setup ---
-client = chromadb.PersistentClient(path=DB_PATH)
-collection = client.get_or_create_collection("documents")
+client = chromadb.PersistentClient(path=settings.CHROMA_PATH)
+collection = client.get_or_create_collection(
+    settings.COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
+)
 
 
 # --- Schemas ---
 class AskRequest(BaseModel):
     question: str
-    n_result: int = 3
-    max_distance: float = 1.4
+    n_result: int = settings.MAX_RESULTS
+    max_distance: float = settings.MAX_DISTANCE
 
 
 class SourceChunk(BaseModel):
@@ -79,9 +77,9 @@ def get_confidence(chunks):
     if not chunks:
         return "none"
     best = chunks[0].distance
-    if best < 1.0:
+    if best < settings.CONFIDENCE_THRESHOLD:
         return "high"
-    if best < 1.3:
+    if best < settings.MEDIUM_CONFIDENCE_THRESHOLD:
         return "medium"
     return "low"
 
@@ -89,8 +87,8 @@ def get_confidence(chunks):
 def generate(messages):
     try:
         r = requests.post(
-            f"{OLLAMA_URL}/api/chat",
-            json={"model": MODEL, "messages": messages, "stream": False},
+            f"{settings.OLLAMA_URL}/api/chat",
+            json={"model": settings.MODEL_NAME, "messages": messages, "stream": False},
         )
         return r.json()["message"]["content"]
     except requests.exceptions.ConnectionError:
@@ -135,9 +133,9 @@ def ask(req: AskRequest):
 
 @app.post("/ingest")
 def ingest_documents():
-    docs_dir = "docs"
+    docs_dir = settings.DOCS_DIRECTORY
     if not os.path.exists(docs_dir):
-        raise HTTPException(404, "docs/ directory not found")
+        raise HTTPException(404, f"{docs_dir}/ directory not found")
 
     chunks, ids, metadatas = [], [], []
     for filename in sorted(os.listdir(docs_dir)):
@@ -161,8 +159,8 @@ def ingest_documents():
 def stats():
     return {
         "document_count": collection.count(),
-        "olama_model": MODEL,
-        "db_path": DB_PATH,
+        "olama_model": settings.MODEL_NAME,
+        "db_path": settings.CHROMA_PATH,
     }
 
 
@@ -170,7 +168,7 @@ def stats():
 def health():
     ollama_ok = False
     try:
-        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=2)
+        r = requests.get(f"{settings.OLLAMA_URL}/api/tags", timeout=2)
         ollama_ok = r.status_code == 200
     except:
         pass
